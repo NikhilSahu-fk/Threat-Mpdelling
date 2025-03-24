@@ -257,7 +257,7 @@ def render_dfd_diagram(mermaid_code):
         mermaid.initialize({{ startOnLoad: true }});
     </script>
     """
-    st.components.v1.html(mermaid_html, height=500, scrolling=True)
+    st.components.v1.html(mermaid_html, height=800, scrolling=True)
 
 
 def save_mermaid_to_file(mermaid_code, filename="dfd_diagram.mmd"):
@@ -313,6 +313,7 @@ def extract_threat_model_sections(threat_model_output):
     extract_section(r"###\s\*\*Assumptions & Open Questions\*\*\s*\n- (.*?)\n(.*?)\n", sections["assumptions"])
 
     return sections
+
 
 
 # Initialize Streamlit app
@@ -408,8 +409,8 @@ with main_container:
 
             # Display the Asset Threat Model Table
             if sections["table"] is not None:
-                print(sections["table"])
-                print("HELLO   ******************************\n")
+                # print(sections["table"])
+                # print("HELLO   ******************************\n")
                 st.markdown("### Asset Threat Model Table")
                 st.table(sections["table"])
 
