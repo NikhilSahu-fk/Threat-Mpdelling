@@ -435,9 +435,11 @@ if "app_state" not in st.session_state:
         "attack_tree_output": None,
         "document_context": None,
         "dfd_mermaid_output": None,
+        "dfd_trust_boundary": None,
         "threat_model_generated": False,
         "attack_tree_generated": False,
         "dfd_mermaid_generated": False,
+        "dfd_trust_boundary_generated": False,
     }
 
 app_state = st.session_state.app_state
@@ -453,7 +455,7 @@ st.sidebar.markdown("""
 5. Click **Create Attack Tree** to visualize attack paths.
 """)
 
-st.header("Threat Modeling with DeepSeek-R1 and RAG")
+st.header("Threat Modeling with Gemini-2.0-Flash and RAG")
 
 # User inputs
 app_type = st.selectbox("Application Type", ["Web", "Mobile", "API", "Desktop"], index=0)
@@ -461,8 +463,68 @@ auth_method = st.selectbox("Authentication Method", ["OAuth", "JWT", "Session-ba
 platform = st.text_input("Describe the Application", "")
 is_internet_facing = st.radio("Is the application internet-facing?", ["Yes", "No"], index=0)
 
+# Function to extract text from image using Tesseract OCR
+def extract_text_from_image(uploaded_file):
+    image = Image.open(uploaded_file)
+    image = np.array(image)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    extracted_text = pytesseract.image_to_string(gray)
+    return extracted_text.strip()
+
 # File uploader
-uploaded_file = st.file_uploader("Upload PRD Document (PDF)", type=["pdf"])
+import streamlit as st
+from PyPDF2 import PdfReader
+from PIL import Image
+import pytesseract
+import io
+
+st.title("📄 Upload PRD (PDF) or DFD (Image)")
+
+# Radio button to select upload type
+upload_type = st.radio("Select Upload Type", ["PRD (PDF)", "DFD (Image)"])
+
+uploaded_file = st.file_uploader(
+    f"Upload your {upload_type}", 
+    type=["pdf"] if upload_type == "PRD (PDF)" else ["png", "jpg", "jpeg"]
+)
+
+if uploaded_file:
+    if upload_type == "PRD (PDF)":
+        # Extract text from PRD PDF
+        pdf_reader = PdfReader(uploaded_file)
+        prd_text = "\n".join(page.extract_text() for page in pdf_reader.pages if page.extract_text())
+
+        # Store PRD content in session_state
+        st.session_state["prd_content"] = prd_text
+        st.session_state["dfd_image"] = None  # Clear DFD image if PRD is uploaded
+
+        st.success("✅ PRD uploaded and processed successfully!")
+
+        # Show extracted PRD content
+        with st.expander("🔍 View Extracted PRD Content"):
+            st.write(prd_text)
+
+    elif upload_type == "DFD (Image)":
+        # Load and display the DFD image
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Uploaded DFD", use_column_width=True)
+
+        # Extract text from DFD using OCR
+        dfd_text = pytesseract.image_to_string(image)
+
+        # Store the image and extracted text in session_state
+        img_bytes = io.BytesIO()
+        image.save(img_bytes, format=image.format)
+        st.session_state["dfd_image"] = img_bytes.getvalue()
+        st.session_state["dfd_text"] = dfd_text
+        st.session_state["prd_content"] = None  # Clear PRD content if DFD is uploaded
+
+        st.success("✅ DFD image uploaded and processed successfully!")
+
+        # Show extracted DFD text (for debugging or further processing)
+        with st.expander("🔍 View Extracted DFD Content"):
+            st.write(dfd_text)
+
 
 # Main content area
 main_container = st.container()
@@ -476,6 +538,8 @@ with main_container:
         loader = PDFPlumberLoader("temp.pdf")
         docs = loader.load()
         app_state["document_context"] = "\n".join([doc.page_content for doc in docs])
+        # Store PRD content in session_state
+        st.session_state["prd_content"] = app_state["document_context"]
         
         # Auto-generate DFD
         if not app_state["dfd_mermaid_generated"]:
@@ -483,6 +547,7 @@ with main_container:
                 try:
                     dfd_mermaid = generate_dfd_mermaid(app_state["document_context"], api_key)
                     app_state["dfd_mermaid_output"] = dfd_mermaid
+                    st.session_state["dfd_mermaid"] = dfd_mermaid
                     app_state["dfd_mermaid_generated"] = True
                 except Exception as e:
                     st.error(f"Error generating DFD: {str(e)}")
@@ -502,6 +567,7 @@ with main_container:
                 try:
                     threat_model = generate_threat_model(docs,app_state["dfd_mermaid_output"], app_type, auth_method, platform, is_internet_facing,api_key)
                     app_state["threat_model_output"] = threat_model
+                    st.session_state["threat_model"] = threat_model
                     app_state["threat_model_generated"] = True
                 except Exception as e:
                     st.error(f"Error generating threat model: {str(e)}")
@@ -559,6 +625,16 @@ with main_container:
                 mime="text/markdown"
             )
             
+            if app_state["threat_model_output"]:
+                dfd_trust_boundary = generate_dfd_with_trust_boundaries(app_state["dfd_mermaid_output"], app_state["threat_model_output"], api_key)
+                st.markdown("### Data Flow Diagram with Trust Boundaries")
+                app_state["dfd_trust_boundary"] = dfd_trust_boundary
+                app_state["dfd_trust_boundary_generated"] = True
+                st.session_state["dfd_trust_boundary"] = dfd_trust_boundary
+                render_dfd_diagram(dfd_trust_boundary)
+                
+
+
             # Attack Tree Generation
             if st.button("Create Attack Tree") and not app_state["attack_tree_generated"]:
                 with st.spinner("Creating Attack Tree..."):
@@ -582,3 +658,20 @@ with main_container:
                 st.code(f"""```mermaid\n{app_state["attack_tree_output"]}\n```""", language="mermaid")
 
                 
+            #Chatbot
+            st.set_page_config(page_title="Threat Modeling", layout="wide")
+
+            st.title("Threat Modeling Tool")
+            st.write("Upload your PRD and generate a Threat Model with DFD.")
+
+            # File upload
+            uploaded_file = st.file_uploader("Upload PRD", type=["pdf", "txt"])
+
+            if uploaded_file:
+                prd_content = uploaded_file.read().decode("utf-8")
+                st.session_state["prd_content"] = prd_content  # Store for later use
+                st.success("PRD uploaded successfully!")
+
+            # Threat Model Button
+            if st.button("Generate Threat Model"):
+                st.write("Generating Threat Model...")  # Call your threat model function here
